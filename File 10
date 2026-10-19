@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
+import { extname, join } from "path";
+import { mkdir } from "fs/promises";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
+import { db } from "@/db";
+import { videos } from "@/db/schema";
+import { ensureVideosTable } from "@/db/ensure";
+import { UPLOADS_DIR } from "@/lib/storage";
+import { desc, ilike, or } from "drizzle-orm";
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+const MAX_SIZE = 2 * 1024 * 1024 * 1024;
+export async function GET(req: NextRequest) {
+  await ensureVideosTable();
+  const q = req.nextUrl.searchParams.get("q")?.trim() || "";
+  let rows;
+  if (q) {
+    const like = `%${q}%`;
+    rows = await db.select().from(videos).where(or(ilike(videos.title, like), ilike(videos.description, like))).orderBy(desc(videos.createdAt));
+  } else { rows = await db.select().from(videos).orderBy(desc(videos.createdAt)); }
+  return NextResponse.json({ videos: rows });
+}
+export async function POST(req: NextRequest) {
+  await ensureVideosTable();
+  const form = await req.formData();
+  const file = form.get("file");
+  const title = String(form.get("title") ?? "").trim();
+  const description = String(form.get("description") ?? "").trim();
+  if (!(file instanceof File) || file.size === 0) return NextResponse.json({ error: "Koi video file nahi mili." }, { status: 400 });
+  if (!file.type.startsWith("video/")) return NextResponse.json({ error: "Sirf video file upload kar sakte hain." }, { status: 400 });
+  if (file.size > MAX_SIZE) return NextResponse.json({ error: "Video 2 GB se chota hona chahiye." }, { status: 400 });
+  await mkdir(UPLOADS_DIR, { recursive: true });
+  const ext = extname(file.name).toLowerCase() || ".mp4";
+  const storedName = `${randomUUID()}${ext}`;
+  const filePath = join(UPLOADS_DIR, storedName);
+  const nodeStream = Readable.fromWeb(file.stream() as never);
+  await pipeline(nodeStream, createWriteStream(filePath));
+  const [row] = await db.insert(videos).values({ title: title || file.name.replace(ext, "") || "Untitled", description, fileName: storedName, originalName: file.name, mimeType: file.type || "video/mp4", size: file.size }).returning();
+  return NextResponse.json({ video: row }, { status: 201 });
+}
