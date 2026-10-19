@@ -1,0 +1,52 @@
+import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { existsSync, statSync, createReadStream } from "fs";
+import { join } from "path";
+import { db } from "@/db";
+import { videos } from "@/db/schema";
+import { ensureVideosTable } from "@/db/ensure";
+import { UPLOADS_DIR } from "@/lib/storage";
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+function toWebStream(readStream: ReturnType<typeof createReadStream>) {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      readStream.on("data", (chunk: Buffer | string) => controller.enqueue(typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk)));
+      readStream.on("end", () => controller.close());
+      readStream.on("error", (err) => controller.error(err));
+    },
+    cancel() { readStream.destroy(); },
+  });
+}
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  await ensureVideosTable();
+  const { id } = await params;
+  const numId = Number(id);
+  if (!Number.isInteger(numId)) return new NextResponse("Invalid id", { status: 400 });
+  const [row] = await db.select().from(videos).where(eq(videos.id, numId)).limit(1);
+  if (!row) return new NextResponse("Video nahi mila", { status: 404 });
+  const filePath = join(UPLOADS_DIR, row.fileName);
+  if (!existsSync(filePath)) return new NextResponse("File missing", { status: 404 });
+  const stat = statSync(filePath);
+  const total = stat.size;
+  const range = req.headers.get("range");
+  if (range) {
+    const match = /bytes=(\d*)-(\d*)/.exec(range);
+    let start = match && match[1] ? parseInt(match[1], 10) : 0;
+    let end = match && match[2] ? parseInt(match[2], 10) : total - 1;
+    if (Number.isNaN(start) || start < 0 || start >= total) start = 0;
+    if (Number.isNaN(end) || end >= total) end = total - 1;
+    if (start > end) return new NextResponse("Range Not Satisfiable", { status: 416, headers: { "Content-Range": `bytes */${total}` } });
+    const chunkSize = end - start + 1;
+    const readStream = createReadStream(filePath, { start, end });
+    return new NextResponse(toWebStream(readStream), {
+      status: 206,
+      headers: { "Content-Range": `bytes ${start}-${end}/${total}`, "Accept-Ranges": "bytes", "Content-Length": String(chunkSize), "Content-Type": row.mimeType, "Cache-Control": "public, max-age=31536000, immutable" },
+    });
+  }
+  const readStream = createReadStream(filePath);
+  return new NextResponse(toWebStream(readStream), {
+    status: 200,
+    headers: { "Content-Length": String(total), "Accept-Ranges": "bytes", "Content-Type": row.mimeType, "Cache-Control": "public, max-age=31536000, immutable" },
+  });
+}
