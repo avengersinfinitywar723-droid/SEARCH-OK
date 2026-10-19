@@ -1,0 +1,4 @@
+import { VideoApp } from "@/components/VideoApp";
+export default function HomePage() {
+  return <VideoApp />;
+}
