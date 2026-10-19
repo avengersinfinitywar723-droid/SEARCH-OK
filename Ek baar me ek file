@@ -1,0 +1,16 @@
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "SEARCH OK — Apni Video Upload Karein",
+  description: "Unlimited videos upload karein aur search karein. SEARCH OK.",
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="hi">
+      <body className="min-h-screen bg-slate-950 text-slate-100 antialiased">{children}</body>
+    </html>
+  );
+}
