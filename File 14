@@ -1,0 +1,56 @@
+"use client";
+import { useRef, useState } from "react";
+import type { Video } from "@/lib/types";
+export function UploadForm({ onUploaded }: { onUploaded: (v: Video) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [error, setError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  function pickFile(f: File | null) {
+    setError("");
+    if (!f) { setFile(null); return; }
+    if (!f.type.startsWith("video/")) { setError("Sirf video file upload kar sakte hain."); return; }
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+  }
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file) { setError("Pehle ek video file chunein."); return; }
+    setUploading(true); setError(""); setProgress(0);
+    const fd = new FormData();
+    fd.append("file", file); fd.append("title", title); fd.append("description", description);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/videos");
+    xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100)); };
+    xhr.onload = () => {
+      setUploading(false);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { const data = JSON.parse(xhr.responseText); onUploaded(data.video as Video); setFile(null); setTitle(""); setDescription(""); setProgress(0); if (inputRef.current) inputRef.current.value = ""; }
+        catch { setError("Upload response samajh nahi aaya."); }
+      } else { let msg = "Upload fail ho gaya."; try { msg = JSON.parse(xhr.responseText).error || msg; } catch {} setError(msg); }
+    };
+    xhr.onerror = () => { setUploading(false); setError("Network error — dobara try karein."); };
+    xhr.send(fd);
+  }
+  return (
+    <form onSubmit={handleSubmit} className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur sm:p-6">
+      <div onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={e => { e.preventDefault(); setDragOver(false); pickFile(e.dataTransfer.files?.[0] ?? null); }} onClick={() => inputRef.current?.click()} className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-4 py-8 text-center transition ${dragOver ? "border-indigo-400 bg-indigo-500/10" : "border-white/20 bg-black/20 hover:border-indigo-400/70"}`}>
+        <div className="grid h-12 w-12 place-items-center rounded-full bg-indigo-500/20 text-2xl">⬆️</div>
+        <p className="text-sm font-medium text-slate-200">{file ? `✅ ${file.name}` : "Video yahan drop karein ya click karein"}</p>
+        <p className="text-xs text-slate-400">MP4, WebM, MOV — unlimited videos, max 2 GB</p>
+        <input ref={inputRef} type="file" accept="video/*" className="hidden" onChange={e => pickFile(e.target.files?.[0] ?? null)} />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Video ka title" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-indigo-400" />
+        <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Description (optional)" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none focus:border-indigo-400" />
+      </div>
+      {uploading && <div className="mt-4"><div className="mb-1 flex justify-between text-xs text-slate-400"><span>Upload ho raha hai…</span><span>{progress}%</span></div><div className="h-2 w-full overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-fuchsia-400 transition-all" style={{ width: `${progress}%` }} /></div></div>}
+      {error && <p className="mt-3 rounded-lg bg-red-500/15 px-3 py-2 text-sm text-red-300">{error}</p>}
+      <button type="submit" disabled={uploading || !file} className="mt-4 w-full rounded-xl bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "Uploading…" : "Video Upload Karein"}</button>
+    </form>
+  );
+}
