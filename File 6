@@ -1,0 +1,20 @@
+import { sql } from "drizzle-orm";
+import { db } from "./index";
+let ensured: Promise<void> | null = null;
+export function ensureVideosTable(): Promise<void> {
+  if (!ensured) {
+    ensured = db.execute(sql`
+      CREATE TABLE IF NOT EXISTS videos (
+        id serial PRIMARY KEY,
+        title text NOT NULL,
+        description text NOT NULL DEFAULT '',
+        file_name text NOT NULL,
+        original_name text NOT NULL,
+        mime_type text NOT NULL,
+        size bigint NOT NULL,
+        duration integer,
+        created_at timestamp NOT NULL DEFAULT now()
+      )`).then(() => undefined);
+  }
+  return ensured;
+}
